@@ -1,0 +1,64 @@
+name: demo-serverless-azf-ci-cd-workflow
+
+run-name: "${{ github.actor }}-${{ github.run_id }}-${{ github.event_name }}-${{ inputs.environment || 'sandbox' }}-ci-cd-azf"
+
+concurrency: 
+  group: default 
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy
+        type: choice
+        options:
+          - 'sandbox'
+          - 'development'
+        required: true
+        default: 'sandbox'
+
+jobs:
+  continuos_integration_job:
+    uses: ./.github/workflows/demo-serverless-ci-workflow.yaml
+    with:
+      infraestructure_target: 'AzureFunction'
+      node_version: ${{ inputs.infraestructure == 'Lambda' && '14.x' || '18.x' }} #FIX For educational use only
+    secrets: inherit
+
+  continuos-deployment-job:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: continuos_integration_job
+    environment: ${{ inputs.environment || 'sandbox' }}
+    steps:
+    - name: Download artifact from build job
+      uses: actions/download-artifact@v4
+      with:
+       name: ${{ needs.continuos_integration_job.outputs.artifact_base_name }}-ci
+
+    - name: 'Login via Azure CLI'
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_RBAC_CREDENTIALS }}
+      
+    - name: unzip artifact for deployment
+      run: unzip ${{ needs.continuos_integration_job.outputs.artifact_base_name }}.zip -d workspace
+
+    - name: unzip output
+      run: ls -ls workspace
+
+    - name: "Deploy stage"
+      run: echo "Deploy started!"
+    
+    - name: 'Run Azure Functions action'
+      uses: Azure/functions-action@v1
+      with:
+        app-name: ${{ vars.AZF_NAME }}
+        package: ./workspace
